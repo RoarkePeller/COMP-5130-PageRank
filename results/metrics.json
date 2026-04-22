@@ -1,0 +1,42 @@
+{
+  "small": {
+    "pagerank": {
+      "runtime_seconds": 0.0710016000084579,
+      "iterations": 12,
+      "converged": true,
+      "final_error": 0.004555179223756016
+    },
+    "comparison": {
+      "hits_authority": {
+        "runtime_seconds": 0.2627320000901818,
+        "spearman_vs_pagerank": 0.05888110939115093,
+        "topk_overlap_vs_pagerank": 0.2
+      },
+      "degree_centrality": {
+        "runtime_seconds": 0.0011866000713780522,
+        "spearman_vs_pagerank": 0.727697724548062,
+        "topk_overlap_vs_pagerank": 0.2
+      }
+    }
+  },
+  "large": {
+    "pagerank": {
+      "runtime_seconds": 2.3575251000002027,
+      "iterations": 2,
+      "converged": true,
+      "final_error": 0.26064995992848305
+    },
+    "comparison": {
+      "hits_authority": {
+        "runtime_seconds": 1.6906088000396267,
+        "spearman_vs_pagerank": 0.1650440606863305,
+        "topk_overlap_vs_pagerank": 0.0
+      },
+      "degree_centrality": {
+        "runtime_seconds": 0.06863390002399683,
+        "spearman_vs_pagerank": 0.8595742312971208,
+        "topk_overlap_vs_pagerank": 0.5
+      }
+    }
+  }
+}

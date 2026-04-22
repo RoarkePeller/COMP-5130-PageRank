@@ -1,0 +1,7 @@
+dataset,algorithm,runtime_seconds
+small,pagerank,0.071002
+small,hits_authority,0.262732
+small,degree_centrality,0.001187
+large,pagerank,2.357525
+large,hits_authority,1.690609
+large,degree_centrality,0.068634
