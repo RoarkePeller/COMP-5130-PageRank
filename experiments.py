@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import csv
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, Hashable, List, Mapping, Tuple
 
 import networkx as nx
 
@@ -21,7 +22,88 @@ MAX_ITER = 100
 TOP_K = 20
 
 
-def save_topk_csv(path: Path, rows: List[Tuple[int, float]], score_name: str) -> None:
+@dataclass(frozen=True)
+class DatasetConfig:
+    name: str
+    path: Path
+    bidirectional: bool
+    node_parser: Callable[[str], Hashable]
+    delimiter: str | None = None
+    source_index: int = 0
+    target_index: int = 1
+    skip_header: bool = False
+    weighted: bool = False
+    weight_index: int | None = 2
+
+
+def reddit_dataset_config(name: str, candidates: List[Path]) -> DatasetConfig | None:
+    for path in candidates:
+        if path.exists():
+            return DatasetConfig(
+                name=name,
+                path=path,
+                bidirectional=False,
+                node_parser=str,
+                delimiter="\t",
+                source_index=0,
+                target_index=1,
+                skip_header=True,
+                weighted=True,
+                weight_index=None,
+            )
+    return None
+
+
+def default_dataset_configs() -> List[DatasetConfig]:
+    configs = [
+        DatasetConfig(
+            name="small",
+            path=SMALL_DATASET,
+            bidirectional=False,
+            node_parser=int,
+        ),
+        DatasetConfig(
+            name="large",
+            path=LARGE_DATASET,
+            bidirectional=True,
+            node_parser=int,
+        ),
+    ]
+    configs.extend(optional_reddit_configs())
+    return configs
+
+
+def optional_reddit_configs() -> List[DatasetConfig]:
+    configs: List[DatasetConfig] = []
+
+    title_config = reddit_dataset_config(
+        "reddit_title",
+        [
+            Path("soc-redditHyperlinks-title.tsv"),
+            Path("data/soc-redditHyperlinks-title.tsv"),
+            Path("reddit_hyperlinks_title.tsv"),
+            Path("data/reddit_hyperlinks_title.tsv"),
+        ],
+    )
+    if title_config is not None:
+        configs.append(title_config)
+
+    body_config = reddit_dataset_config(
+        "reddit_body",
+        [
+            Path("soc-redditHyperlinks-body.tsv"),
+            Path("data/soc-redditHyperlinks-body.tsv"),
+            Path("reddit_hyperlinks_body.tsv"),
+            Path("data/reddit_hyperlinks_body.tsv"),
+        ],
+    )
+    if body_config is not None:
+        configs.append(body_config)
+
+    return configs
+
+
+def save_topk_csv(path: Path, rows: List[Tuple[Hashable, float]], score_name: str) -> None:
     """Write top-ranked nodes and scores to a CSV file."""
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -30,10 +112,10 @@ def save_topk_csv(path: Path, rows: List[Tuple[int, float]], score_name: str) ->
             writer.writerow([node, f"{score:.12f}"])
 
 
-def rank_map(scores: Dict[int, float]) -> Dict[int, float]:
+def rank_map(scores: Dict[Hashable, float]) -> Dict[Hashable, float]:
     """Convert score values into descending ranks"""
     ordered = sorted(scores.items(), key=lambda pair: pair[1], reverse=True)
-    result: Dict[int, float] = {}
+    result: Dict[Hashable, float] = {}
     i = 0
     while i < len(ordered):
         j = i + 1
@@ -46,7 +128,7 @@ def rank_map(scores: Dict[int, float]) -> Dict[int, float]:
     return result
 
 
-def spearman_correlation(scores_a: Dict[int, float], scores_b: Dict[int, float]) -> float:
+def spearman_correlation(scores_a: Dict[Hashable, float], scores_b: Dict[Hashable, float]) -> float:
     """Compute Spearman rank on shared nodes between score maps."""
     common_nodes = list(set(scores_a).intersection(scores_b))
     if len(common_nodes) < 2:
@@ -70,8 +152,8 @@ def spearman_correlation(scores_a: Dict[int, float], scores_b: Dict[int, float])
 
 
 def topk_overlap(
-    scores_a: Dict[int, float],
-    scores_b: Dict[int, float],
+    scores_a: Dict[Hashable, float],
+    scores_b: Dict[Hashable, float],
     *,
     k: int = TOP_K,
 ) -> float:
@@ -82,22 +164,31 @@ def topk_overlap(
 
 
 def timed_pagerank(
-    edge_file: Path,
+    config: DatasetConfig,
     *,
-    bidirectional: bool,
     alpha: float,
     tol: float,
     max_iter: int,
 ) -> Tuple[PageRankResult, float]:
     """Run PageRank and return result with runtime"""
-    adjacency = load_edge_list(edge_file, bidirectional=bidirectional)
+    adjacency = load_edge_list(
+        config.path,
+        node_parser=config.node_parser,
+        bidirectional=config.bidirectional,
+        delimiter=config.delimiter,
+        source_index=config.source_index,
+        target_index=config.target_index,
+        skip_header=config.skip_header,
+        weighted=config.weighted,
+        weight_index=config.weight_index,
+    )
     start = perf_counter()
     result = pagerank_power_iteration(adjacency, alpha=alpha, tol=tol, max_iter=max_iter)
     runtime_s = perf_counter() - start
     return result, runtime_s
 
 
-def timed_networkx_algo(func) -> Tuple[Dict[int, float], float]:
+def timed_networkx_algo(func) -> Tuple[Dict[Hashable, float], float]:
     """Run NetworkX pagerank and measure runtime."""
     start = perf_counter()
     scores = func()
@@ -105,7 +196,7 @@ def timed_networkx_algo(func) -> Tuple[Dict[int, float], float]:
     return scores, runtime_s
 
 
-def timed_hits_authority(graph: nx.Graph | nx.DiGraph) -> Tuple[Dict[int, float], float]:
+def timed_hits_authority(graph: nx.Graph | nx.DiGraph) -> Tuple[Dict[Hashable, float], float]:
     """Run HITS authority scores"""
     attempts = (200, 1000)
     last_error: Exception | None = None
@@ -121,37 +212,43 @@ def timed_hits_authority(graph: nx.Graph | nx.DiGraph) -> Tuple[Dict[int, float]
     raise RuntimeError("Unexpected HITS failure.")
 
 
-def load_dataset_graph(dataset_path: Path, *, bidirectional: bool) -> nx.DiGraph:
-    """Load edge list"""
-    if bidirectional:
-        undirected = nx.read_edgelist(
-            dataset_path,
-            comments="#",
-            nodetype=int,
-            create_using=nx.Graph(),
-        )
-        return nx.to_directed(undirected)
-    return nx.read_edgelist(
-        dataset_path,
-        comments="#",
-        nodetype=int,
-        create_using=nx.DiGraph(),
+def load_dataset_graph(config: DatasetConfig) -> nx.DiGraph:
+    """Load edge list using the same parsing settings as custom PageRank."""
+    adjacency = load_edge_list(
+        config.path,
+        node_parser=config.node_parser,
+        bidirectional=config.bidirectional,
+        delimiter=config.delimiter,
+        source_index=config.source_index,
+        target_index=config.target_index,
+        skip_header=config.skip_header,
+        weighted=config.weighted,
+        weight_index=config.weight_index,
     )
+    graph = nx.DiGraph()
+    for src, neighbors in adjacency.items():
+        if isinstance(neighbors, Mapping):
+            for dst, weight in neighbors.items():
+                graph.add_edge(src, dst, weight=float(weight))
+        else:
+            for dst in neighbors:
+                graph.add_edge(src, dst)
+        if src not in graph:
+            graph.add_node(src)
+    return graph
 
 
 def run_dataset_analysis(
     *,
-    dataset_name: str,
-    dataset_path: Path,
-    bidirectional: bool,
+    config: DatasetConfig,
     runtime_rows: List[List[object]],
     metrics: Dict[str, Dict[str, object]],
 ) -> None:
-    graph = load_dataset_graph(dataset_path, bidirectional=bidirectional)
+    dataset_name = config.name
+    graph = load_dataset_graph(config)
 
     pagerank_result, pagerank_runtime = timed_pagerank(
-        dataset_path,
-        bidirectional=bidirectional,
+        config,
         alpha=ALPHA,
         tol=TOL,
         max_iter=MAX_ITER,
@@ -167,22 +264,10 @@ def run_dataset_analysis(
         }
     }
 
-    hits_scores, hits_runtime = timed_hits_authority(graph)
-    runtime_rows.append([dataset_name, "hits_authority", f"{hits_runtime:.6f}"])
-
     degree_scores, degree_runtime = timed_networkx_algo(lambda: nx.degree_centrality(graph))
     runtime_rows.append([dataset_name, "degree_centrality", f"{degree_runtime:.6f}"])
 
-    metrics[dataset_name]["comparison"] = {
-        "hits_authority": {
-            "runtime_seconds": hits_runtime,
-            "spearman_vs_pagerank": spearman_correlation(pagerank_result.scores, hits_scores),
-            "topk_overlap_vs_pagerank": topk_overlap(
-                pagerank_result.scores,
-                hits_scores,
-                k=TOP_K,
-            ),
-        },
+    comparison_metrics: Dict[str, Dict[str, object]] = {
         "degree_centrality": {
             "runtime_seconds": degree_runtime,
             "spearman_vs_pagerank": spearman_correlation(pagerank_result.scores, degree_scores),
@@ -191,8 +276,28 @@ def run_dataset_analysis(
                 degree_scores,
                 k=TOP_K,
             ),
-        },
+        }
     }
+
+    try:
+        hits_scores, hits_runtime = timed_hits_authority(graph)
+        runtime_rows.append([dataset_name, "hits_authority", f"{hits_runtime:.6f}"])
+        comparison_metrics["hits_authority"] = {
+            "runtime_seconds": hits_runtime,
+            "spearman_vs_pagerank": spearman_correlation(pagerank_result.scores, hits_scores),
+            "topk_overlap_vs_pagerank": topk_overlap(
+                pagerank_result.scores,
+                hits_scores,
+                k=TOP_K,
+            ),
+        }
+    except Exception as exc:
+        comparison_metrics["hits_authority"] = {
+            "runtime_seconds": None,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    metrics[dataset_name]["comparison"] = comparison_metrics
 
     save_topk_csv(
         RESULTS_DIR / f"{dataset_name}_pagerank_top20.csv",
@@ -201,26 +306,51 @@ def run_dataset_analysis(
     )
 
 
+def add_reddit_cross_dataset_metrics(metrics: Dict[str, Dict[str, object]]) -> None:
+    title_metrics = metrics.get("reddit_title")
+    body_metrics = metrics.get("reddit_body")
+    if title_metrics is None or body_metrics is None:
+        return
+
+    title_path = RESULTS_DIR / "reddit_title_pagerank_top20.csv"
+    body_path = RESULTS_DIR / "reddit_body_pagerank_top20.csv"
+    if not title_path.exists() or not body_path.exists():
+        return
+
+    def load_topk_scores(path: Path) -> Dict[str, float]:
+        with path.open("r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            score_col = next(col for col in (reader.fieldnames or []) if col != "node")
+            return {str(row["node"]): float(row[score_col]) for row in reader}
+
+    title_scores = load_topk_scores(title_path)
+    body_scores = load_topk_scores(body_path)
+
+    comparison = {
+        "spearman_vs_reddit_body_top20": spearman_correlation(title_scores, body_scores),
+        "topk_overlap_vs_reddit_body": topk_overlap(title_scores, body_scores, k=TOP_K),
+    }
+    title_metrics["cross_dataset_comparison"] = comparison
+    body_metrics["cross_dataset_comparison"] = {
+        "spearman_vs_reddit_title_top20": comparison["spearman_vs_reddit_body_top20"],
+        "topk_overlap_vs_reddit_title": comparison["topk_overlap_vs_reddit_body"],
+    }
+
+
 def main() -> None:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     metrics: Dict[str, Dict[str, object]] = {}
     runtime_rows: List[List[object]] = [["dataset", "algorithm", "runtime_seconds"]]
 
-    run_dataset_analysis(
-        dataset_name="small",
-        dataset_path=SMALL_DATASET,
-        bidirectional=False,
-        runtime_rows=runtime_rows,
-        metrics=metrics,
-    )
-    run_dataset_analysis(
-        dataset_name="large",
-        dataset_path=LARGE_DATASET,
-        bidirectional=True,
-        runtime_rows=runtime_rows,
-        metrics=metrics,
-    )
+    for config in default_dataset_configs():
+        run_dataset_analysis(
+            config=config,
+            runtime_rows=runtime_rows,
+            metrics=metrics,
+        )
+
+    add_reddit_cross_dataset_metrics(metrics)
 
     with (RESULTS_DIR / "runtime_summary.csv").open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)

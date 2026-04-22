@@ -1,42 +1,90 @@
 {
   "small": {
     "pagerank": {
-      "runtime_seconds": 0.0710016000084579,
+      "runtime_seconds": 0.052182100000209175,
       "iterations": 12,
       "converged": true,
       "final_error": 0.004555179223756016
     },
     "comparison": {
-      "hits_authority": {
-        "runtime_seconds": 0.2627320000901818,
-        "spearman_vs_pagerank": 0.05888110939115093,
+      "degree_centrality": {
+        "runtime_seconds": 0.0010830999999598134,
+        "spearman_vs_pagerank": 0.727697724548062,
         "topk_overlap_vs_pagerank": 0.2
       },
-      "degree_centrality": {
-        "runtime_seconds": 0.0011866000713780522,
-        "spearman_vs_pagerank": 0.727697724548062,
+      "hits_authority": {
+        "runtime_seconds": 0.23833639999975276,
+        "spearman_vs_pagerank": 0.05836144131350429,
         "topk_overlap_vs_pagerank": 0.2
       }
     }
   },
   "large": {
     "pagerank": {
-      "runtime_seconds": 2.3575251000002027,
+      "runtime_seconds": 2.408602699999392,
       "iterations": 2,
       "converged": true,
       "final_error": 0.26064995992848305
     },
     "comparison": {
-      "hits_authority": {
-        "runtime_seconds": 1.6906088000396267,
-        "spearman_vs_pagerank": 0.1650440606863305,
-        "topk_overlap_vs_pagerank": 0.0
-      },
       "degree_centrality": {
-        "runtime_seconds": 0.06863390002399683,
+        "runtime_seconds": 0.08591889999843261,
         "spearman_vs_pagerank": 0.8595742312971208,
         "topk_overlap_vs_pagerank": 0.5
+      },
+      "hits_authority": {
+        "runtime_seconds": 1.8114934999994148,
+        "spearman_vs_pagerank": 0.16504396468181437,
+        "topk_overlap_vs_pagerank": 0.0
       }
+    }
+  },
+  "reddit_title": {
+    "pagerank": {
+      "runtime_seconds": 0.4672582000002876,
+      "iterations": 4,
+      "converged": true,
+      "final_error": 0.03719219659321071
+    },
+    "comparison": {
+      "degree_centrality": {
+        "runtime_seconds": 0.0194813999987673,
+        "spearman_vs_pagerank": 0.6000456984778058,
+        "topk_overlap_vs_pagerank": 0.75
+      },
+      "hits_authority": {
+        "runtime_seconds": 0.2572035000011965,
+        "spearman_vs_pagerank": 0.8436640471489809,
+        "topk_overlap_vs_pagerank": 0.7
+      }
+    },
+    "cross_dataset_comparison": {
+      "spearman_vs_reddit_body_top20": 0.8671328671328671,
+      "topk_overlap_vs_reddit_body": 0.6
+    }
+  },
+  "reddit_body": {
+    "pagerank": {
+      "runtime_seconds": 0.29423299999871233,
+      "iterations": 5,
+      "converged": true,
+      "final_error": 0.025421295618570827
+    },
+    "comparison": {
+      "degree_centrality": {
+        "runtime_seconds": 0.012314300000070943,
+        "spearman_vs_pagerank": 0.6668478370784974,
+        "topk_overlap_vs_pagerank": 0.6
+      },
+      "hits_authority": {
+        "runtime_seconds": 0.12777959999948507,
+        "spearman_vs_pagerank": 0.8112309842204495,
+        "topk_overlap_vs_pagerank": 0.5
+      }
+    },
+    "cross_dataset_comparison": {
+      "spearman_vs_reddit_title_top20": 0.8671328671328671,
+      "topk_overlap_vs_reddit_title": 0.6
     }
   }
 }

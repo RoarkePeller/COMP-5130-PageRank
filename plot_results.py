@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import csv
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, Hashable, List, Mapping, Tuple
 
 import matplotlib.pyplot as plt
 import networkx as nx
+
+from pagerank_impl import load_edge_list
 
 
 RESULTS_DIR = Path("results")
@@ -14,14 +17,104 @@ SMALL_DATASET = Path("CA-GrQc.txt")
 LARGE_DATASET = Path("com-dblp.ungraph.txt")
 
 
+@dataclass(frozen=True)
+class DatasetPlotConfig:
+    name: str
+    path: Path
+    bidirectional: bool
+    node_parser: Callable[[str], Hashable]
+    delimiter: str | None = None
+    source_index: int = 0
+    target_index: int = 1
+    skip_header: bool = False
+    weighted: bool = False
+    weight_index: int | None = 2
+    enable_subgraphs: bool = True
+
+
+def reddit_plot_config(name: str, candidates: List[Path]) -> DatasetPlotConfig | None:
+    for path in candidates:
+        if path.exists():
+            return DatasetPlotConfig(
+                name=name,
+                path=path,
+                bidirectional=False,
+                node_parser=str,
+                delimiter="\t",
+                source_index=0,
+                target_index=1,
+                skip_header=True,
+                weighted=True,
+                weight_index=None,
+                enable_subgraphs=False,
+            )
+    return None
+
+
+def default_plot_configs() -> List[DatasetPlotConfig]:
+    configs = [
+        DatasetPlotConfig(
+            name="small",
+            path=SMALL_DATASET,
+            bidirectional=False,
+            node_parser=int,
+        ),
+        DatasetPlotConfig(
+            name="large",
+            path=LARGE_DATASET,
+            bidirectional=True,
+            node_parser=int,
+        ),
+    ]
+    configs.extend(optional_reddit_plot_configs())
+    return configs
+
+
+def optional_reddit_plot_configs() -> List[DatasetPlotConfig]:
+    configs: List[DatasetPlotConfig] = []
+
+    title_config = reddit_plot_config(
+        "reddit_title",
+        [
+            Path("soc-redditHyperlinks-title.tsv"),
+            Path("data/soc-redditHyperlinks-title.tsv"),
+            Path("reddit_hyperlinks_title.tsv"),
+            Path("data/reddit_hyperlinks_title.tsv"),
+        ],
+    )
+    if title_config is not None:
+        configs.append(title_config)
+
+    body_config = reddit_plot_config(
+        "reddit_body",
+        [
+            Path("soc-redditHyperlinks-body.tsv"),
+            Path("data/soc-redditHyperlinks-body.tsv"),
+            Path("reddit_hyperlinks_body.tsv"),
+            Path("data/reddit_hyperlinks_body.tsv"),
+        ],
+    )
+    if body_config is not None:
+        configs.append(body_config)
+
+    return configs
+
+
+def parse_node_value(text: str) -> Hashable:
+    try:
+        return int(text)
+    except ValueError:
+        return text
+
+
 """Reads CSV and returns (node, score) rows."""
-def read_topk(path: Path) -> List[Tuple[int, float]]:
-    rows: List[Tuple[int, float]] = []
+def read_topk(path: Path) -> List[Tuple[Hashable, float]]:
+    rows: List[Tuple[Hashable, float]] = []
     with path.open("r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         score_col = [c for c in reader.fieldnames or [] if c != "node"][0]
         for row in reader:
-            rows.append((int(row["node"]), float(row[score_col])))
+            rows.append((parse_node_value(row["node"]), float(row[score_col])))
     return rows
 
 """Reads runtime summary CSV and returns tuples."""
@@ -34,24 +127,32 @@ def read_runtime(path: Path) -> List[Tuple[str, str, float]]:
     return rows
 
 """Loads edge list"""
-def load_dataset_graph(dataset_path: Path, *, bidirectional: bool) -> nx.DiGraph:
-    if bidirectional:
-        undirected = nx.read_edgelist(
-            dataset_path,
-            comments="#",
-            nodetype=int,
-            create_using=nx.Graph(),
-        )
-        return nx.to_directed(undirected)
-    return nx.read_edgelist(
-        dataset_path,
-        comments="#",
-        nodetype=int,
-        create_using=nx.DiGraph(),
+def load_dataset_graph(config: DatasetPlotConfig) -> nx.DiGraph:
+    adjacency = load_edge_list(
+        config.path,
+        node_parser=config.node_parser,
+        bidirectional=config.bidirectional,
+        delimiter=config.delimiter,
+        source_index=config.source_index,
+        target_index=config.target_index,
+        skip_header=config.skip_header,
+        weighted=config.weighted,
+        weight_index=config.weight_index,
     )
+    graph = nx.DiGraph()
+    for src, neighbors in adjacency.items():
+        if isinstance(neighbors, Mapping):
+            for dst, weight in neighbors.items():
+                graph.add_edge(src, dst, weight=float(weight))
+        else:
+            for dst in neighbors:
+                graph.add_edge(src, dst)
+        if src not in graph:
+            graph.add_node(src)
+    return graph
 
 """Renders results as a table"""
-def plot_topk_table(rows: List[Tuple[int, float]], out_path: Path, title: str) -> None:
+def plot_topk_table(rows: List[Tuple[Hashable, float]], out_path: Path, title: str) -> None:
     fig, ax = plt.subplots(figsize=(7, 8))
     ax.axis("off")
     table_data = [[node, f"{score:.8f}"] for node, score in rows]
@@ -72,30 +173,10 @@ def plot_topk_table(rows: List[Tuple[int, float]], out_path: Path, title: str) -
 
 """Bar chart comparing runtime across datasets andalgorithms."""
 def plot_runtime_chart(rows: List[Tuple[str, str, float]], out_path: Path) -> None:
-    runtime_map = {(dataset, algo): runtime for dataset, algo, runtime in rows}
-    ordered_keys = [
-        ("small", "pagerank"),
-        ("large", "pagerank"),
-        ("small", "hits_authority"),
-        ("large", "hits_authority"),
-        ("small", "degree_centrality"),
-        ("large", "degree_centrality"),
-    ]
-    label_map = {
-        ("small", "pagerank"): "small-pagerank",
-        ("large", "pagerank"): "large-pagerank",
-        ("small", "hits_authority"): "small-hits_authority",
-        ("large", "hits_authority"): "large-hits_authority",
-        ("small", "degree_centrality"): "small-degree_centrality",
-        ("large", "degree_centrality"): "large-degree_centrality",
-    }
-
-    labels: List[str] = []
-    values: List[float] = []
-    for key in ordered_keys:
-        if key in runtime_map:
-            labels.append(label_map[key])
-            values.append(runtime_map[key])
+    algo_order = {"pagerank": 0, "hits_authority": 1, "degree_centrality": 2}
+    ordered_rows = sorted(rows, key=lambda row: (row[0], algo_order.get(row[1], 99), row[1]))
+    labels = [f"{dataset}-{algorithm}" for dataset, algorithm, _ in ordered_rows]
+    values = [runtime for _, _, runtime in ordered_rows]
 
     fig, ax = plt.subplots(figsize=(12, 5))
     ax.bar(labels, values)
@@ -107,13 +188,41 @@ def plot_runtime_chart(rows: List[Tuple[str, str, float]], out_path: Path) -> No
     plt.close(fig)
 
 
+def plot_reddit_top10_comparison(out_path: Path) -> None:
+    title_path = RESULTS_DIR / "reddit_title_pagerank_top20.csv"
+    body_path = RESULTS_DIR / "reddit_body_pagerank_top20.csv"
+    if not title_path.exists() or not body_path.exists():
+        return
+
+    title_rows = read_topk(title_path)[:10]
+    body_rows = read_topk(body_path)[:10]
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7), sharex=False)
+    datasets = [
+        (axes[0], title_rows, "Reddit Title Top 10"),
+        (axes[1], body_rows, "Reddit Body Top 10"),
+    ]
+
+    for ax, rows, title in datasets:
+        labels = [str(node) for node, _ in rows][::-1]
+        values = [score for _, score in rows][::-1]
+        ax.barh(labels, values, color="#4c78a8")
+        ax.set_title(title)
+        ax.set_xlabel("PageRank score")
+
+    fig.suptitle("Reddit PageRank Comparison: Title vs Body")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=220)
+    plt.close(fig)
+
+
 """Selects nodes for display"""
 def choose_subgraph_nodes(
     graph: nx.DiGraph,
-    ranked_nodes: List[int],
+    ranked_nodes: List[Hashable],
     *,
     mode: str,
-) -> set[int]:
+) -> set[Hashable]:
     if mode == "neighbors":
         core_nodes = ranked_nodes[:5]
         selected = set(core_nodes)
@@ -127,7 +236,7 @@ def choose_subgraph_nodes(
 """Draws a weighted subgraph using top-ranked nodes."""
 def plot_weighted_subgraph(
     graph: nx.DiGraph,
-    score_map: Dict[int, float],
+    score_map: Dict[Hashable, float],
     out_path: Path,
     *,
     mode: str,
@@ -165,15 +274,15 @@ def plot_weighted_subgraph(
 
 
 """Generates all plots from stored results."""
-def plot_dataset_outputs(
-    *,
-    dataset_name: str,
-    dataset_path: Path,
-    bidirectional: bool,
-) -> None:
-    top20_rows = read_topk(RESULTS_DIR / f"{dataset_name}_pagerank_top20.csv")
+def plot_dataset_outputs(config: DatasetPlotConfig) -> None:
+    dataset_name = config.name
+    top20_path = RESULTS_DIR / f"{dataset_name}_pagerank_top20.csv"
+    if not top20_path.exists():
+        return
+
+    top20_rows = read_topk(top20_path)
     score_map = {node: score for node, score in top20_rows}
-    dataset_label = dataset_path.name
+    dataset_label = config.path.name
 
     plot_topk_table(
         top20_rows,
@@ -181,7 +290,10 @@ def plot_dataset_outputs(
         title=f"Top 20 PageRank Nodes ({dataset_label})",
     )
 
-    graph = load_dataset_graph(dataset_path, bidirectional=bidirectional)
+    if not config.enable_subgraphs:
+        return
+
+    graph = load_dataset_graph(config)
     plot_weighted_subgraph(
         graph,
         score_map,
@@ -203,17 +315,10 @@ def main() -> None:
 
     runtime_rows = read_runtime(RESULTS_DIR / "runtime_summary.csv")
     plot_runtime_chart(runtime_rows, FIGURES_DIR / "runtime_comparison.png")
+    plot_reddit_top10_comparison(FIGURES_DIR / "reddit_title_body_top10_comparison.png")
 
-    plot_dataset_outputs(
-        dataset_name="small",
-        dataset_path=SMALL_DATASET,
-        bidirectional=False,
-    )
-    plot_dataset_outputs(
-        dataset_name="large",
-        dataset_path=LARGE_DATASET,
-        bidirectional=True,
-    )
+    for config in default_plot_configs():
+        plot_dataset_outputs(config)
 
     print(f"Saved figures to {FIGURES_DIR}")
 

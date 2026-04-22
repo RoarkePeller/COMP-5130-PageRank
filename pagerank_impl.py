@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Mapping, Sequence, Tuple
+from typing import Callable, Dict, Hashable, List, Mapping, Sequence, Tuple, TypeVar
+
+NodeT = TypeVar("NodeT", bound=Hashable)
 
 @dataclass
 class PageRankResult:
-    scores: Dict[int, float]
+    scores: Dict[NodeT, float]
     iterations: int
     converged: bool
     final_error: float
@@ -15,9 +17,16 @@ class PageRankResult:
 def load_edge_list(
     file_path: str | Path,
     *,
+    node_parser: Callable[[str], NodeT] = int,
     bidirectional: bool = False,
-) -> Dict[int, List[int]]:
-    adjacency: Dict[int, List[int]] = {}
+    delimiter: str | None = None,
+    source_index: int = 0,
+    target_index: int = 1,
+    skip_header: bool = False,
+    weighted: bool = False,
+    weight_index: int | None = 2,
+) -> Dict[NodeT, List[NodeT] | Dict[NodeT, float]]:
+    adjacency: Dict[NodeT, List[NodeT] | Dict[NodeT, float]] = {}
     path = Path(file_path)
 
     with path.open("r", encoding="utf-8") as f:
@@ -26,28 +35,62 @@ def load_edge_list(
             if not line or line.startswith("#"):
                 continue
 
-            src_text, dst_text, *_ = line.split()
-            src = int(src_text)
-            dst = int(dst_text)
+            parts = line.split(delimiter) if delimiter is not None else line.split()
+            if len(parts) <= max(source_index, target_index):
+                continue
 
-            adjacency.setdefault(src, []).append(dst)
+            src_text, dst_text = parts[source_index], parts[target_index]
+            if skip_header and src_text == "SOURCE_SUBREDDIT" and dst_text == "TARGET_SUBREDDIT":
+                continue
+
+            try:
+                src = node_parser(src_text)
+                dst = node_parser(dst_text)
+            except (TypeError, ValueError):
+                # Skip header lines or malformed records.
+                continue
+
+            if weighted:
+                weight = 1.0
+                if weight_index is not None and len(parts) > weight_index:
+                    try:
+                        weight = float(parts[weight_index])
+                    except (TypeError, ValueError):
+                        weight = 1.0
+
+                src_neighbors = adjacency.setdefault(src, {})
+                assert isinstance(src_neighbors, dict)
+                src_neighbors[dst] = src_neighbors.get(dst, 0.0) + weight
+                adjacency.setdefault(dst, {})
+
+                if bidirectional:
+                    dst_neighbors = adjacency.setdefault(dst, {})
+                    assert isinstance(dst_neighbors, dict)
+                    dst_neighbors[src] = dst_neighbors.get(src, 0.0) + weight
+                continue
+
+            src_neighbors = adjacency.setdefault(src, [])
+            assert isinstance(src_neighbors, list)
+            src_neighbors.append(dst)
             adjacency.setdefault(dst, [])
 
             if bidirectional:
-                adjacency[dst].append(src)
+                dst_neighbors = adjacency.setdefault(dst, [])
+                assert isinstance(dst_neighbors, list)
+                dst_neighbors.append(src)
 
     return adjacency
 
 
 def pagerank_power_iteration(
-    adjacency: Dict[int, Sequence[int] | Mapping[int, float]],
+    adjacency: Dict[NodeT, Sequence[NodeT] | Mapping[NodeT, float]],
     *,
     alpha: float = 0.85,
     tol: float = 1e-6,
     max_iter: int = 100,
-    personalization: Mapping[int, float] | None = None,
-    nstart: Mapping[int, float] | None = None,
-    dangling: Mapping[int, float] | None = None,
+    personalization: Mapping[NodeT, float] | None = None,
+    nstart: Mapping[NodeT, float] | None = None,
+    dangling: Mapping[NodeT, float] | None = None,
 ) -> PageRankResult:
     """Compute PageRank"""
     if not adjacency:
@@ -57,10 +100,10 @@ def pagerank_power_iteration(
     num_nodes = len(nodes)
 
     def normalize_distribution(
-        values: Mapping[int, float] | None,
+        values: Mapping[NodeT, float] | None,
         *,
         default_uniform: bool,
-    ) -> Dict[int, float]:
+    ) -> Dict[NodeT, float]:
         if values is None:
             if default_uniform:
                 return {node: 1.0 / num_nodes for node in nodes}
@@ -76,10 +119,10 @@ def pagerank_power_iteration(
             raise ZeroDivisionError()
         return {node: value / total for node, value in dist.items()}
 
-    transition: Dict[int, Dict[int, float]] = {node: {} for node in nodes}
+    transition: Dict[NodeT, Dict[NodeT, float]] = {node: {} for node in nodes}
     for src in nodes:
         neighbors = adjacency.get(src, [])
-        weighted_counts: Dict[int, float] = {}
+        weighted_counts: Dict[NodeT, float] = {}
 
         if isinstance(neighbors, Mapping):
             for dst, weight in neighbors.items():
@@ -144,10 +187,9 @@ def pagerank_power_iteration(
         final_error=final_error,
     )
 
-
-def top_k(scores: Dict[int, float], k: int = 20) -> List[Tuple[int, float]]:
+def top_k(scores: Dict[NodeT, float], k: int = 20) -> List[Tuple[NodeT, float]]:
     return sorted(scores.items(), key=lambda pair: pair[1], reverse=True)[:k]
 
 
-def rank_order(scores: Dict[int, float]) -> List[int]:
+def rank_order(scores: Dict[NodeT, float]) -> List[NodeT]:
     return [node for node, _ in sorted(scores.items(), key=lambda pair: pair[1], reverse=True)]
