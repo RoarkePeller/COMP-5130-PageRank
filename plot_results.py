@@ -216,6 +216,71 @@ def plot_reddit_top10_comparison(out_path: Path) -> None:
     plt.close(fig)
 
 
+def plot_reddit_sentiment_comparison(out_path: Path, dataset_name: str) -> None:
+    """Plot side-by-side comparison of positive vs negative sentiment top-20."""
+    positive_path = RESULTS_DIR / f"{dataset_name}_positive_top20.csv"
+    negative_path = RESULTS_DIR / f"{dataset_name}_negative_top20.csv"
+    
+    if not positive_path.exists() or not negative_path.exists():
+        return
+    
+    positive_rows = read_topk(positive_path)
+    negative_rows = read_topk(negative_path)
+    
+    # Create side-by-side table comparison
+    fig, ax = plt.subplots(figsize=(14, 10))
+    ax.axis("off")
+    
+    # Prepare table data
+    table_data = []
+    max_rows = max(len(positive_rows), len(negative_rows))
+    
+    for i in range(max_rows):
+        row = []
+        if i < len(positive_rows):
+            pos_node, pos_score = positive_rows[i]
+            row.extend([str(i+1), str(pos_node), f"{pos_score:.8f}"])
+        else:
+            row.extend(["", "", ""])
+        
+        if i < len(negative_rows):
+            neg_node, neg_score = negative_rows[i]
+            row.extend([str(i+1), str(neg_node), f"{neg_score:.8f}"])
+        else:
+            row.extend(["", "", ""])
+        
+        table_data.append(row)
+    
+    col_labels = ["Rank", "Node (Positive)", "PageRank", "Rank", "Node (Negative)", "PageRank"]
+    table = ax.table(
+        cellText=table_data,
+        colLabels=col_labels,
+        loc="center",
+        cellLoc="left",
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    table.scale(1.0, 1.3)
+    
+    # Style header
+    for i in range(len(col_labels)):
+        table[(0, i)].set_facecolor("#4c78a8")
+        table[(0, i)].set_text_props(weight="bold", color="white")
+    
+    # Alternate row colors
+    for i in range(1, len(table_data) + 1):
+        for j in range(len(col_labels)):
+            if i % 2 == 0:
+                table[(i, j)].set_facecolor("#f0f0f0")
+    
+    dataset_label = dataset_name.replace("_", " ").title()
+    ax.set_title(f"Sentiment Analysis: Positive vs Negative ({dataset_label})", 
+                 fontsize=14, fontweight="bold", pad=12)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=220)
+    plt.close(fig)
+
+
 """Selects nodes for display"""
 def choose_subgraph_nodes(
     graph: nx.DiGraph,
@@ -320,6 +385,16 @@ def main() -> None:
     runtime_rows = read_runtime(RESULTS_DIR / "runtime_summary.csv")
     plot_runtime_chart(runtime_rows, FIGURES_DIR / "runtime_comparison.png")
     plot_reddit_top10_comparison(FIGURES_DIR / "reddit_title_body_top10_comparison.png")
+    
+    # Generate sentiment comparison visualizations
+    plot_reddit_sentiment_comparison(
+        FIGURES_DIR / "reddit_title_sentiment_comparison.png",
+        "reddit_title"
+    )
+    plot_reddit_sentiment_comparison(
+        FIGURES_DIR / "reddit_body_sentiment_comparison.png",
+        "reddit_body"
+    )
 
     for config in default_plot_configs():
         plot_dataset_outputs(config)

@@ -9,7 +9,7 @@ from typing import Callable, Dict, Hashable, List, Mapping, Tuple
 
 import networkx as nx
 
-from pagerank_impl import PageRankResult, load_edge_list, pagerank_power_iteration, top_k
+from pagerank_impl import PageRankResult, load_edge_list, load_edge_list_with_sentiment_filter, pagerank_power_iteration, top_k
 
 
 SMALL_DATASET = Path("CA-GrQc.txt")
@@ -34,6 +34,7 @@ class DatasetConfig:
     skip_header: bool = False
     weighted: bool = False
     weight_index: int | None = 2
+    sentiment_index: int | None = None
 
 
 def reddit_dataset_config(name: str, candidates: List[Path]) -> DatasetConfig | None:
@@ -50,6 +51,7 @@ def reddit_dataset_config(name: str, candidates: List[Path]) -> DatasetConfig | 
                 skip_header=True,
                 weighted=True,
                 weight_index=None,
+                sentiment_index=4,
             )
     return None
 
@@ -173,6 +175,37 @@ def timed_pagerank(
     """Run PageRank and return result with runtime"""
     adjacency = load_edge_list(
         config.path,
+        node_parser=config.node_parser,
+        bidirectional=config.bidirectional,
+        delimiter=config.delimiter,
+        source_index=config.source_index,
+        target_index=config.target_index,
+        skip_header=config.skip_header,
+        weighted=config.weighted,
+        weight_index=config.weight_index,
+    )
+    start = perf_counter()
+    result = pagerank_power_iteration(adjacency, alpha=alpha, tol=tol, max_iter=max_iter)
+    runtime_s = perf_counter() - start
+    return result, runtime_s
+
+
+def timed_pagerank_sentiment_filtered(
+    config: DatasetConfig,
+    sentiment_value: int,
+    *,
+    alpha: float,
+    tol: float,
+    max_iter: int,
+) -> Tuple[PageRankResult, float]:
+    """Run PageRank on sentiment-filtered edges and return result with runtime"""
+    if config.sentiment_index is None:
+        raise ValueError(f"Dataset {config.name} does not support sentiment filtering")
+    
+    adjacency = load_edge_list_with_sentiment_filter(
+        config.path,
+        target_sentiments=[sentiment_value],
+        sentiment_index=config.sentiment_index,
         node_parser=config.node_parser,
         bidirectional=config.bidirectional,
         delimiter=config.delimiter,
@@ -337,6 +370,67 @@ def add_reddit_cross_dataset_metrics(metrics: Dict[str, Dict[str, object]]) -> N
     }
 
 
+def run_reddit_sentiment_analysis(
+    *,
+    config: DatasetConfig,
+    metrics: Dict[str, Dict[str, object]],
+) -> None:
+    """Run sentiment-split PageRank analysis for Reddit datasets."""
+    if config.sentiment_index is None:
+        return
+    
+    dataset_name = config.name
+    
+    # Run PageRank for positive sentiment (1)
+    positive_result, positive_runtime = timed_pagerank_sentiment_filtered(
+        config,
+        sentiment_value=1,
+        alpha=ALPHA,
+        tol=TOL,
+        max_iter=MAX_ITER,
+    )
+    
+    # Run PageRank for negative sentiment (-1)
+    negative_result, negative_runtime = timed_pagerank_sentiment_filtered(
+        config,
+        sentiment_value=-1,
+        alpha=ALPHA,
+        tol=TOL,
+        max_iter=MAX_ITER,
+    )
+    
+    # Store results in metrics
+    if dataset_name not in metrics:
+        metrics[dataset_name] = {}
+    
+    metrics[dataset_name]["pagerank_positive"] = {
+        "runtime_seconds": positive_runtime,
+        "iterations": positive_result.iterations,
+        "converged": positive_result.converged,
+        "final_error": positive_result.final_error,
+    }
+    
+    metrics[dataset_name]["pagerank_negative"] = {
+        "runtime_seconds": negative_runtime,
+        "iterations": negative_result.iterations,
+        "converged": negative_result.converged,
+        "final_error": negative_result.final_error,
+    }
+    
+    # Save top-k results to CSV
+    save_topk_csv(
+        RESULTS_DIR / f"{dataset_name}_positive_top20.csv",
+        top_k(positive_result.scores, k=TOP_K),
+        "pagerank",
+    )
+    
+    save_topk_csv(
+        RESULTS_DIR / f"{dataset_name}_negative_top20.csv",
+        top_k(negative_result.scores, k=TOP_K),
+        "pagerank",
+    )
+
+
 def main() -> None:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -347,6 +441,13 @@ def main() -> None:
         run_dataset_analysis(
             config=config,
             runtime_rows=runtime_rows,
+            metrics=metrics,
+        )
+
+    # Run sentiment-split analysis for Reddit datasets
+    for config in optional_reddit_configs():
+        run_reddit_sentiment_analysis(
+            config=config,
             metrics=metrics,
         )
 
