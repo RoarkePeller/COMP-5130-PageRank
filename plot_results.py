@@ -29,7 +29,7 @@ class DatasetPlotConfig:
     skip_header: bool = False
     weighted: bool = False
     weight_index: int | None = 2
-    enable_subgraphs: bool = True
+    subgraph_modes: Tuple[str, ...] = ("induced_top20", "neighbors")
 
 
 def reddit_plot_config(name: str, candidates: List[Path]) -> DatasetPlotConfig | None:
@@ -46,7 +46,7 @@ def reddit_plot_config(name: str, candidates: List[Path]) -> DatasetPlotConfig |
                 skip_header=True,
                 weighted=True,
                 weight_index=None,
-                enable_subgraphs=False,
+                subgraph_modes=("connectivity",),
             )
     return None
 
@@ -230,7 +230,17 @@ def choose_subgraph_nodes(
             selected.update(graph.predecessors(node))
             selected.update(graph.successors(node))
         return selected
+    if mode == "connectivity":
+        return set(ranked_nodes[:15])
     return set(ranked_nodes[:20])
+
+
+def mode_filename_suffix(mode: str) -> str:
+    return {
+        "induced_top20": "weighted_top_nodes_induced_top20",
+        "neighbors": "weighted_top_nodes_neighbors",
+        "connectivity": "weighted_top_nodes_connectivity",
+    }.get(mode, f"weighted_top_nodes_{mode}")
 
 
 """Draws a weighted subgraph using top-ranked nodes."""
@@ -290,24 +300,18 @@ def plot_dataset_outputs(config: DatasetPlotConfig) -> None:
         title=f"Top 20 PageRank Nodes ({dataset_label})",
     )
 
-    if not config.enable_subgraphs:
+    if not config.subgraph_modes:
         return
 
     graph = load_dataset_graph(config)
-    plot_weighted_subgraph(
-        graph,
-        score_map,
-        FIGURES_DIR / f"{dataset_name}_weighted_top_nodes_induced_top20.png",
-        mode="induced_top20",
-        dataset_label=dataset_label,
-    )
-    plot_weighted_subgraph(
-        graph,
-        score_map,
-        FIGURES_DIR / f"{dataset_name}_weighted_top_nodes_neighbors.png",
-        mode="neighbors",
-        dataset_label=dataset_label,
-    )
+    for mode in config.subgraph_modes:
+        plot_weighted_subgraph(
+            graph,
+            score_map,
+            FIGURES_DIR / f"{dataset_name}_{mode_filename_suffix(mode)}.png",
+            mode=mode,
+            dataset_label=dataset_label,
+        )
 
 
 def main() -> None:
