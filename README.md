@@ -1,4 +1,4 @@
-# PageRank Experiment Pipeline
+# PageRank
 
 This project runs PageRank experiments on:
 - `CA-GrQc.txt` (small graph)
