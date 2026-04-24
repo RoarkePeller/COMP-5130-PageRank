@@ -56,7 +56,7 @@ def default_plot_configs() -> List[DatasetPlotConfig]:
         DatasetPlotConfig(
             name="small",
             path=SMALL_DATASET,
-            bidirectional=False,
+            bidirectional=True,
             node_parser=int,
         ),
         DatasetPlotConfig(

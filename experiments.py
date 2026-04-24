@@ -59,7 +59,7 @@ def default_dataset_configs() -> List[DatasetConfig]:
         DatasetConfig(
             name="small",
             path=SMALL_DATASET,
-            bidirectional=False,
+            bidirectional=True,
             node_parser=int,
         ),
         DatasetConfig(
