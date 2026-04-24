@@ -82,6 +82,86 @@ def load_edge_list(
     return adjacency
 
 
+def load_edge_list_with_sentiment_filter(
+    file_path: str | Path,
+    *,
+    target_sentiments: List[int] | int,
+    sentiment_index: int,
+    node_parser: Callable[[str], NodeT] = int,
+    bidirectional: bool = False,
+    delimiter: str | None = None,
+    source_index: int = 0,
+    target_index: int = 1,
+    skip_header: bool = False,
+    weighted: bool = False,
+    weight_index: int | None = 2,
+) -> Dict[NodeT, List[NodeT] | Dict[NodeT, float]]:
+    """Load edge list with sentiment filtering. Only edges matching target_sentiments are included."""
+    if isinstance(target_sentiments, int):
+        target_sentiments = [target_sentiments]
+    target_sentiments_set = set(target_sentiments)
+    
+    adjacency: Dict[NodeT, List[NodeT] | Dict[NodeT, float]] = {}
+    path = Path(file_path)
+
+    with path.open("r", encoding="utf-8") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            parts = line.split(delimiter) if delimiter is not None else line.split()
+            if len(parts) <= max(source_index, target_index, sentiment_index):
+                continue
+
+            src_text, dst_text = parts[source_index], parts[target_index]
+            if skip_header and src_text == "SOURCE_SUBREDDIT" and dst_text == "TARGET_SUBREDDIT":
+                continue
+
+            try:
+                src = node_parser(src_text)
+                dst = node_parser(dst_text)
+                sentiment = int(parts[sentiment_index])
+            except (TypeError, ValueError):
+                # Skip header lines or malformed records.
+                continue
+
+            # Filter by sentiment
+            if sentiment not in target_sentiments_set:
+                continue
+
+            if weighted:
+                weight = 1.0
+                if weight_index is not None and len(parts) > weight_index:
+                    try:
+                        weight = float(parts[weight_index])
+                    except (TypeError, ValueError):
+                        weight = 1.0
+
+                src_neighbors = adjacency.setdefault(src, {})
+                assert isinstance(src_neighbors, dict)
+                src_neighbors[dst] = src_neighbors.get(dst, 0.0) + weight
+                adjacency.setdefault(dst, {})
+
+                if bidirectional:
+                    dst_neighbors = adjacency.setdefault(dst, {})
+                    assert isinstance(dst_neighbors, dict)
+                    dst_neighbors[src] = dst_neighbors.get(src, 0.0) + weight
+                continue
+
+            src_neighbors = adjacency.setdefault(src, [])
+            assert isinstance(src_neighbors, list)
+            src_neighbors.append(dst)
+            adjacency.setdefault(dst, [])
+
+            if bidirectional:
+                dst_neighbors = adjacency.setdefault(dst, [])
+                assert isinstance(dst_neighbors, list)
+                dst_neighbors.append(src)
+
+    return adjacency
+
+
 def pagerank_power_iteration(
     adjacency: Dict[NodeT, Sequence[NodeT] | Mapping[NodeT, float]],
     *,
